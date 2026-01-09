@@ -1,10 +1,18 @@
 # Mihomo Proxy Docker
 
+[![Build](https://github.com/ba0gu0/mihomo-proxy/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/ba0gu0/mihomo-proxy/actions/workflows/docker-publish.yml)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](https://www.docker.com/)
 [![Mihomo](https://img.shields.io/badge/Mihomo-Meta-purple)](https://github.com/MetaCubeX/mihomo)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
 基于 [MetaCubeX/mihomo](https://github.com/MetaCubeX/mihomo) 的增强版 Docker 镜像，集成 [Yacd-meta](https://github.com/MetaCubeX/Yacd-meta) Web UI 管理界面。
+
+## 📦 镜像地址
+
+```bash
+# 拉取最新镜像
+docker pull ghcr.io/ba0gu0/mihomo-proxy:latest
+```
 
 ## ✨ 功能特性
 
@@ -28,13 +36,13 @@ docker build -t mihomo-proxy .
 
 ```bash
 # 纯代理模式 (无管理界面)
-docker run -d -p 7890:7890 mihomo-proxy
+docker run -d -p 7890:7890 ghcr.io/ba0gu0/mihomo-proxy:latest
 
 # 带管理界面
 docker run -d -p 7890:7890 -p 9090:9090 \
   -e API_SECRET=your_password \
   -e SUBSCRIPTION_URL=https://订阅地址.com \
-  mihomo-proxy
+  ghcr.io/ba0gu0/mihomo-proxy:latest
 ```
 
 访问管理界面: http://localhost:9090/ui
@@ -88,7 +96,7 @@ docker compose up -d --build
 docker run -d \
   -p 7890:7890 \
   -v ./config.yaml:/root/.config/mihomo/config.yaml \
-  mihomo-proxy
+  ghcr.io/ba0gu0/mihomo-proxy:latest
 ```
 
 ### 2. 使用订阅链接
@@ -102,7 +110,7 @@ docker run -d \
   -e API_SECRET=my_password \
   -e SUBSCRIPTION_URL=https://your-subscription-url \
   -e SUBSCRIPTION_INTERVAL=12 \
-  mihomo-proxy
+  ghcr.io/ba0gu0/mihomo-proxy:latest
 ```
 
 ### 3. 全局代理模式
@@ -117,7 +125,7 @@ docker run -d \
   -e PROXY_MODE=global \
   -e GLOBAL_PROXY=节点选择 \
   -e SUBSCRIPTION_URL=https://your-subscription-url \
-  mihomo-proxy
+  ghcr.io/ba0gu0/mihomo-proxy:latest
 ```
 
 ### 4. 作为其他容器的代理
@@ -126,7 +134,7 @@ docker run -d \
 # docker-compose.yaml
 services:
   mihomo:
-    image: mihomo-proxy
+    image: ghcr.io/ba0gu0/mihomo-proxy:latest
     ports:
       - "7890:7890"
     environment:
@@ -147,7 +155,7 @@ services:
 ```yaml
 services:
   mihomo:
-    image: mihomo-proxy
+    image: ghcr.io/ba0gu0/mihomo-proxy:latest
     ports:
       - "7890:7890"
       - "9090:9090"
@@ -184,9 +192,7 @@ your-project/
 services:
   # Mihomo 代理服务
   mihomo:
-    build: 
-      context: ./MihomoProxy  # 或使用预构建镜像
-    # image: your-registry/mihomo-proxy:latest
+    image: ghcr.io/ba0gu0/mihomo-proxy:latest
     container_name: mihomo-proxy
     ports:
       - "7890:7890"   # 代理端口 (可选对外暴露)
@@ -269,7 +275,7 @@ logging-to-file: true
 ```yaml
 services:
   mihomo:
-    image: mihomo-proxy
+    image: ghcr.io/ba0gu0/mihomo-proxy:latest
     # ... mihomo 配置 ...
 
   your-ai-app:
@@ -278,7 +284,7 @@ services:
       # 方式1: 通过环境变量设置代理
       - HTTP_PROXY=http://mihomo:7890
       - HTTPS_PROXY=http://mihomo:7890
-      
+    
       # 方式2: 某些应用使用特定的代理配置
       # - OPENAI_PROXY=http://mihomo:7890
       # - CURL_PROXY=http://mihomo:7890
@@ -330,7 +336,7 @@ services:
 ```yaml
 services:
   mihomo:
-    image: mihomo-proxy
+    image: ghcr.io/ba0gu0/mihomo-proxy:latest
     network_mode: host
     environment:
       - API_SECRET=your_password
