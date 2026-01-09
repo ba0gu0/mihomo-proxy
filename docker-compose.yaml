@@ -1,0 +1,38 @@
+services:
+  mihomo:
+    build: .
+    image: mihomo-proxy:latest
+    container_name: mihomo-proxy
+    ports:
+      # 混合代理端口 (HTTP + SOCKS5)
+      - "7890:7890"
+      # 管理 API + UI 端口
+      - "9090:9090"
+    environment:
+      # 代理配置
+      - MIXED_PORT=7890
+      - ALLOW_LAN=true
+      - PROXY_MODE=rule  # rule/global/direct
+      
+      # 管理界面配置 (设置密钥后启用)
+      - API_PORT=9090
+      - API_SECRET=your_secure_password
+      
+      # 订阅配置 (可选)
+      # - SUBSCRIPTION_URL=https://your-subscription-url
+      # - SUBSCRIPTION_INTERVAL=12
+      
+      # 日志级别
+      - LOG_LEVEL=info
+    volumes:
+      # 可选: 挂载自定义配置文件
+      # - ./config.yaml:/root/.config/mihomo/config.yaml
+      
+      # 可选: 持久化缓存和数据库
+      - mihomo-data:/root/.config/mihomo
+    restart: unless-stopped
+    # 网络模式 (可选: 使用 host 网络以获得更好性能)
+    # network_mode: host
+
+volumes:
+  mihomo-data:

@@ -1,0 +1,15 @@
+# Mihomo 运行时配置目录
+mihomo-config/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 临时文件
+*.tmp
+*.log
