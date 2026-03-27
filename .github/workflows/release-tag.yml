@@ -1,0 +1,184 @@
+name: Create Release Tag
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC. 01:00 UTC == Friday 09:00 Asia/Shanghai.
+    - cron: '0 1 * * 5'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump strategy
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+          - exact
+      version:
+        description: Exact version when bump=exact, for example 1.2.3 or v1.2.3
+        required: false
+        type: string
+      release_notes:
+        description: Optional release notes for manual releases
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  MIHOMO_IMAGE: metacubex/mihomo:latest
+  YACD_REPO: MetaCubeX/Yacd-meta
+  YACD_REF: gh-pages
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-tag-${{ github.ref_name || github.run_id }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Resolve current upstream state
+        id: upstream
+        run: |
+          MIHOMO_DIGEST="$(docker buildx imagetools inspect "${MIHOMO_IMAGE}" | awk '/^Digest:/ {print $2; exit}')"
+          YACD_COMMIT="$(git ls-remote "https://github.com/${YACD_REPO}.git" "refs/heads/${YACD_REF}" | awk '{print $1}')"
+
+          if [[ -z "${MIHOMO_DIGEST}" || -z "${YACD_COMMIT}" ]]; then
+            echo "Failed to resolve upstream state." >&2
+            exit 1
+          fi
+
+          echo "mihomo_digest=${MIHOMO_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "yacd_commit=${YACD_COMMIT}" >> "$GITHUB_OUTPUT"
+
+      - name: Read previous upstream state
+        id: previous
+        run: |
+          LATEST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n 1 || true)"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+
+          if [[ -z "${LATEST_TAG}" ]]; then
+            exit 0
+          fi
+
+          TAG_MESSAGE="$(git for-each-ref "refs/tags/${LATEST_TAG}" --format='%(contents)')"
+          PREV_MIHOMO_DIGEST="$(printf '%s\n' "${TAG_MESSAGE}" | sed -n 's/^mihomo-digest: //p' | tail -n 1)"
+          PREV_YACD_COMMIT="$(printf '%s\n' "${TAG_MESSAGE}" | sed -n 's/^yacd-commit: //p' | tail -n 1)"
+
+          echo "mihomo_digest=${PREV_MIHOMO_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "yacd_commit=${PREV_YACD_COMMIT}" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to create a new release tag
+        id: decision
+        env:
+          CURRENT_MIHOMO_DIGEST: ${{ steps.upstream.outputs.mihomo_digest }}
+          CURRENT_YACD_COMMIT: ${{ steps.upstream.outputs.yacd_commit }}
+          PREVIOUS_MIHOMO_DIGEST: ${{ steps.previous.outputs.mihomo_digest }}
+          PREVIOUS_YACD_COMMIT: ${{ steps.previous.outputs.yacd_commit }}
+          LATEST_TAG: ${{ steps.previous.outputs.latest_tag }}
+        run: |
+          SHOULD_RELEASE=false
+          REASON="No upstream changes detected."
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            SHOULD_RELEASE=true
+            REASON="Manual release requested."
+          elif [[ -z "${LATEST_TAG}" ]]; then
+            SHOULD_RELEASE=true
+            REASON="No existing release tag found."
+          elif [[ -z "${PREVIOUS_MIHOMO_DIGEST}" || -z "${PREVIOUS_YACD_COMMIT}" ]]; then
+            SHOULD_RELEASE=true
+            REASON="Latest tag metadata is missing upstream state."
+          elif [[ "${CURRENT_MIHOMO_DIGEST}" != "${PREVIOUS_MIHOMO_DIGEST}" && "${CURRENT_YACD_COMMIT}" != "${PREVIOUS_YACD_COMMIT}" ]]; then
+            SHOULD_RELEASE=true
+            REASON="Mihomo base image and Yacd UI both changed."
+          elif [[ "${CURRENT_MIHOMO_DIGEST}" != "${PREVIOUS_MIHOMO_DIGEST}" ]]; then
+            SHOULD_RELEASE=true
+            REASON="Mihomo base image changed."
+          elif [[ "${CURRENT_YACD_COMMIT}" != "${PREVIOUS_YACD_COMMIT}" ]]; then
+            SHOULD_RELEASE=true
+            REASON="Yacd UI changed."
+          fi
+
+          {
+            echo "should_release=${SHOULD_RELEASE}"
+            echo "reason=${REASON}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Determine release version
+        id: version
+        if: steps.decision.outputs.should_release == 'true'
+        env:
+          INPUT_BUMP: ${{ github.event_name == 'workflow_dispatch' && inputs.bump || 'patch' }}
+          INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+        run: |
+          VERSION="$(bash .github/scripts/next-version.sh "${INPUT_BUMP}" "${INPUT_VERSION}")"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push git tag
+        if: steps.decision.outputs.should_release == 'true'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_REASON: ${{ steps.decision.outputs.reason }}
+          RELEASE_NOTES: ${{ github.event_name == 'workflow_dispatch' && inputs.release_notes || '' }}
+          MIHOMO_DIGEST: ${{ steps.upstream.outputs.mihomo_digest }}
+          YACD_COMMIT: ${{ steps.upstream.outputs.yacd_commit }}
+        run: |
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists on origin."
+            exit 0
+          fi
+
+          TAG_MESSAGE_FILE="$(mktemp)"
+
+          {
+            echo "Release ${TAG}"
+            echo
+            if [[ -n "${RELEASE_NOTES}" ]]; then
+              echo "${RELEASE_NOTES}"
+              echo
+            fi
+            echo "release-reason: ${RELEASE_REASON}"
+            echo "mihomo-image: ${MIHOMO_IMAGE}"
+            echo "mihomo-digest: ${MIHOMO_DIGEST}"
+            echo "yacd-repo: ${YACD_REPO}"
+            echo "yacd-ref: ${YACD_REF}"
+            echo "yacd-commit: ${YACD_COMMIT}"
+          } > "${TAG_MESSAGE_FILE}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -F "${TAG_MESSAGE_FILE}"
+          git push origin "${TAG}"
+
+      - name: Ensure GitHub release exists
+        if: steps.decision.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists."
+            exit 0
+          fi
+
+          gh release create "${TAG}" --title "${TAG}" --notes-from-tag --verify-tag
+
+      - name: Skip release when upstream is unchanged
+        if: steps.decision.outputs.should_release != 'true'
+        run: |
+          echo "${{ steps.decision.outputs.reason }}"

@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-  # 手动触发构建
-  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
@@ -14,6 +12,9 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    concurrency:
+      group: docker-publish-${{ github.ref_name }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -51,8 +52,8 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
+          pull: true
+          no-cache: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
