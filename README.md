@@ -20,7 +20,7 @@ docker pull ghcr.io/ba0gu0/mihomo-proxy:latest
 
 - 自动检查: GitHub Actions 会在每周五 `09:00`（北京时间，`01:00 UTC`）运行一次 `Create Release Tag`，检查上游 `metacubex/mihomo:latest` 的 digest 和 `MetaCubeX/Yacd-meta` 的 `gh-pages` 最新 commit。
 - 自动发布: 只有检测到上游变化时，才会基于当前最新 `vX.Y.Z` tag 自动创建下一个 `patch` 版本，例如 `v1.0.0 -> v1.0.1`。
-- 自动构建: 只要仓库出现新的 `vX.Y.Z` tag，`docker-publish.yml` 就会自动构建并推送 GHCR 镜像，镜像 tag 与 Git tag 一致。
+- 自动构建: 手动或定时运行 `Create Release Tag` 后，会显式派发 `docker-publish.yml` 构建对应 tag 的镜像；如果有人直接推送新的 `vX.Y.Z` tag，`docker-publish.yml` 也会自动构建并推送 GHCR 镜像。
 - 手动发布: 推荐在 GitHub Actions 里手动运行 `Create Release Tag`，选择 `patch` / `minor` / `major` / `exact`。这样会先创建正确的 Git tag，再自动触发镜像构建。
 - 手动指定版本: 如果选择 `exact`，请输入新的语义化版本号，例如 `1.2.3` 或 `v1.2.3`。工作流会校验它必须大于当前最新 tag。
 - GitHub Release 页面: 如果你直接在 Releases 页面手动发版，也请先创建一个新的 `vX.Y.Z` tag。构建实际是由 tag 触发的，所以不要复用旧 tag。
@@ -32,6 +32,7 @@ docker pull ghcr.io/ba0gu0/mihomo-proxy:latest
 - 手动发布也走同一套版本规则，因此不会出现自动版本和手动版本各自漂移的问题。
 - `latest` 镜像始终指向最近一次成功发布的正式版本，具体语义化版本镜像例如 `ghcr.io/ba0gu0/mihomo-proxy:1.0.1` 则与 Git tag `v1.0.1` 一一对应。
 - 构建时会强制拉取最新基础镜像并禁用构建缓存，避免 `metacubex/mihomo:latest` 或 `Yacd-meta gh-pages` 因缓存命中而没有真正更新。
+- 工作流已启用 `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true`，并升级到新的 `actions/checkout` 版本，提前兼容 GitHub Actions 的 Node 24 迁移。
 
 ## ✨ 功能特性
 

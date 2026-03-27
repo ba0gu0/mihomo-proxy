@@ -26,9 +26,11 @@ on:
         type: string
 
 permissions:
+  actions: write
   contents: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   MIHOMO_IMAGE: metacubex/mihomo:latest
   YACD_REPO: MetaCubeX/Yacd-meta
   YACD_REF: gh-pages
@@ -42,12 +44,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Resolve current upstream state
         id: upstream
@@ -177,6 +179,14 @@ jobs:
           fi
 
           gh release create "${TAG}" --title "${TAG}" --notes-from-tag --verify-tag
+
+      - name: Trigger image build workflow
+        if: steps.decision.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh workflow run docker-publish.yml --ref "${GITHUB_REF_NAME}" -f release_tag="${TAG}"
 
       - name: Skip release when upstream is unchanged
         if: steps.decision.outputs.should_release != 'true'
