@@ -19,14 +19,21 @@ services:
       - API_SECRET=your_secure_password
       
       # 订阅配置 (可选)
+      # - SUBSCRIPTION_PATH=/subscriptions/profile.yaml
       # - SUBSCRIPTION_URL=https://your-subscription-url
       # - SUBSCRIPTION_INTERVAL=12
+      # - SUBSCRIPTION_RETRY_ATTEMPTS=3
+      # - SUBSCRIPTION_RETRY_DELAY=3
+      # - SUBSCRIPTION_OVERRIDE_FILE=/overrides/override.yaml
+      # - SUBSCRIPTION_OVERRIDE_URL=https://raw.githubusercontent.com/.../override.js
       
       # 日志级别
       - LOG_LEVEL=info
     volumes:
       # 可选: 挂载自定义配置文件
       # - ./config.yaml:/root/.config/mihomo/config.yaml
+      # - ./subscriptions:/subscriptions:ro
+      # - ./overrides:/overrides:ro
       
       # 可选: 持久化缓存和数据库
       - mihomo-data:/root/.config/mihomo

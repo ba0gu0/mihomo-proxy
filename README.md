@@ -96,8 +96,16 @@ docker compose up -d --build
 
 | 变量                      | 默认值   | 说明                    |
 | ------------------------- | -------- | ----------------------- |
+| `SUBSCRIPTION_PATH`      | *(空)* | 容器内订阅文件路径       |
 | `SUBSCRIPTION_URL`      | *(空)* | 订阅地址                |
 | `SUBSCRIPTION_INTERVAL` | `24`   | 订阅自动更新间隔 (小时) |
+| `SUBSCRIPTION_RETRY_ATTEMPTS` | `3` | 订阅下载重试次数 |
+| `SUBSCRIPTION_RETRY_DELAY` | `3` | 订阅下载重试间隔 (秒) |
+| `SUBSCRIPTION_OVERRIDE_FILE` | *(空)* | 本地 override 文件 |
+| `SUBSCRIPTION_OVERRIDE_URL` | *(空)* | 远程 override 地址 |
+
+`SUBSCRIPTION_PATH` 优先于 `SUBSCRIPTION_URL`。如果两者都配置，会优先读取
+容器内的订阅文件，再应用 override 生成最终配置。
 
 ### 其他
 
@@ -105,6 +113,16 @@ docker compose up -d --build
 | ------------- | ----------------- | -------------------------------------------------------------------- |
 | `LOG_LEVEL` | `info`          | 日志级别:`silent` / `error` / `warning` / `info` / `debug` |
 | `TZ`        | `Asia/Shanghai` | 时区设置                                                             |
+
+## 🧪 测试
+
+```bash
+# 验证 Go override 引擎
+cd subprojects/override-merge && ./scripts/test.sh
+
+# 验证 Docker 集成
+./scripts/docker-smoke.sh
+```
 
 ## 📖 使用示例
 
@@ -133,7 +151,34 @@ docker run -d \
   ghcr.io/ba0gu0/mihomo-proxy:latest
 ```
 
-### 3. 全局代理模式
+### 3. 使用本地订阅文件
+
+```bash
+docker run -d \
+  -p 7890:7890 \
+  -p 9090:9090 \
+  -e API_SECRET=my_password \
+  -e SUBSCRIPTION_PATH=/subscriptions/profile.yaml \
+  -v ./subscriptions:/subscriptions:ro \
+  ghcr.io/ba0gu0/mihomo-proxy:latest
+```
+
+### 4. 使用 override-hub 脚本转换订阅
+
+```bash
+docker run -d \
+  -p 7890:7890 \
+  -p 9090:9090 \
+  -e API_SECRET=my_password \
+  -e SUBSCRIPTION_URL=https://your-subscription-url \
+  -e SUBSCRIPTION_OVERRIDE_URL=https://raw.githubusercontent.com/.../override.yaml \
+  ghcr.io/ba0gu0/mihomo-proxy:latest
+```
+
+`SUBSCRIPTION_OVERRIDE_URL` 和 `SUBSCRIPTION_OVERRIDE_FILE` 都支持 `.yaml`
+和 `.js` 脚本，最终生成的仍然是 YAML 配置。
+
+### 5. 全局代理模式
 
 设置为全局代理模式，并指定使用的代理组：
 
@@ -148,7 +193,7 @@ docker run -d \
   ghcr.io/ba0gu0/mihomo-proxy:latest
 ```
 
-### 4. 作为其他容器的代理
+### 6. 作为其他容器的代理
 
 ```yaml
 # docker-compose.yaml
@@ -170,7 +215,7 @@ services:
       - mihomo
 ```
 
-### 5. 持久化数据
+### 7. 持久化数据
 
 ```yaml
 services:

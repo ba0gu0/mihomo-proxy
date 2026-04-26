@@ -13,28 +13,153 @@ API_SECRET="${API_SECRET:-}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
 PROXY_MODE="${PROXY_MODE:-rule}"
 GLOBAL_PROXY="${GLOBAL_PROXY:-PROXY}"
+SUBSCRIPTION_PATH="${SUBSCRIPTION_PATH:-}"
 SUBSCRIPTION_URL="${SUBSCRIPTION_URL:-}"
 SUBSCRIPTION_INTERVAL="${SUBSCRIPTION_INTERVAL:-24}"
+SUBSCRIPTION_RETRY_ATTEMPTS="${SUBSCRIPTION_RETRY_ATTEMPTS:-3}"
+SUBSCRIPTION_RETRY_DELAY="${SUBSCRIPTION_RETRY_DELAY:-3}"
+SUBSCRIPTION_OVERRIDE_FILE="${SUBSCRIPTION_OVERRIDE_FILE:-}"
+SUBSCRIPTION_OVERRIDE_URL="${SUBSCRIPTION_OVERRIDE_URL:-}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# 下载订阅配置
+is_unsigned_integer() {
+    case "$1" in
+        ''|*[!0-9]*)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
+}
+
+has_subscription_source() {
+    [ -n "$SUBSCRIPTION_PATH" ] || [ -n "$SUBSCRIPTION_URL" ]
+}
+
+has_subscription_override() {
+    [ -n "$SUBSCRIPTION_OVERRIDE_FILE" ] || [ -n "$SUBSCRIPTION_OVERRIDE_URL" ]
+}
+
+copy_subscription_file() {
+    if [ ! -f "$SUBSCRIPTION_PATH" ]; then
+        log "订阅文件不存在: ${SUBSCRIPTION_PATH}"
+        return 1
+    fi
+
+    log "正在读取订阅文件: ${SUBSCRIPTION_PATH}"
+    if ! cp "$SUBSCRIPTION_PATH" "${CONFIG_FILE}.tmp"; then
+        log "订阅文件复制失败"
+        rm -f "${CONFIG_FILE}.tmp"
+        return 1
+    fi
+    if ! mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"; then
+        log "订阅文件写入失败"
+        rm -f "${CONFIG_FILE}.tmp"
+        return 1
+    fi
+    log "订阅文件读取成功"
+}
+
 download_subscription() {
-    if [ -n "$SUBSCRIPTION_URL" ]; then
-        log "正在下载订阅配置..."
-        if curl -sSL -A "clash-verge/v1.7.7" -o "${CONFIG_FILE}.tmp" "$SUBSCRIPTION_URL"; then
-            mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"
+    if [ -z "$SUBSCRIPTION_URL" ]; then
+        return 1
+    fi
+
+    if ! is_unsigned_integer "$SUBSCRIPTION_RETRY_ATTEMPTS" ||
+        ! is_unsigned_integer "$SUBSCRIPTION_RETRY_DELAY"; then
+        log "订阅重试参数无效，改用默认值"
+        SUBSCRIPTION_RETRY_ATTEMPTS=3
+        SUBSCRIPTION_RETRY_DELAY=3
+    fi
+
+    attempts="$SUBSCRIPTION_RETRY_ATTEMPTS"
+    if [ "$attempts" -lt 1 ]; then
+        attempts=1
+    fi
+
+    current=1
+    while [ "$current" -le "$attempts" ]; do
+        log "正在下载订阅配置... (${current}/${attempts})"
+        if curl -fsSL \
+            -A "clash-verge/v1.7.7" \
+            -o "${CONFIG_FILE}.tmp" \
+            "$SUBSCRIPTION_URL"; then
+            if ! mv "${CONFIG_FILE}.tmp" "$CONFIG_FILE"; then
+                log "订阅配置落盘失败"
+                rm -f "${CONFIG_FILE}.tmp"
+                return 1
+            fi
             log "订阅配置下载成功"
             return 0
-        else
-            log "订阅配置下载失败"
-            rm -f "${CONFIG_FILE}.tmp"
+        fi
+
+        rm -f "${CONFIG_FILE}.tmp"
+        if [ "$current" -lt "$attempts" ]; then
+            log "订阅配置下载失败，${SUBSCRIPTION_RETRY_DELAY}秒后重试"
+            sleep "$SUBSCRIPTION_RETRY_DELAY"
+        fi
+        current=$((current + 1))
+    done
+
+    log "订阅配置下载失败，已达到最大重试次数"
+    return 1
+}
+
+apply_subscription_override() {
+    if [ -n "$SUBSCRIPTION_OVERRIDE_FILE" ]; then
+        if [ ! -f "$SUBSCRIPTION_OVERRIDE_FILE" ]; then
+            log "override 文件不存在: ${SUBSCRIPTION_OVERRIDE_FILE}"
             return 1
         fi
+
+        log "应用 override 文件: ${SUBSCRIPTION_OVERRIDE_FILE}"
+        if ! /usr/local/bin/override-merge \
+            -config "$CONFIG_FILE" \
+            -override "$SUBSCRIPTION_OVERRIDE_FILE" \
+            -output "${CONFIG_FILE}.merged"; then
+            rm -f "${CONFIG_FILE}.merged"
+            return 1
+        fi
+        if ! mv "${CONFIG_FILE}.merged" "$CONFIG_FILE"; then
+            rm -f "${CONFIG_FILE}.merged"
+            return 1
+        fi
+        return 0
     fi
-    return 1
+
+    if [ -n "$SUBSCRIPTION_OVERRIDE_URL" ]; then
+        log "应用 override 地址: ${SUBSCRIPTION_OVERRIDE_URL}"
+        if ! /usr/local/bin/override-merge \
+            -config "$CONFIG_FILE" \
+            -override-url "$SUBSCRIPTION_OVERRIDE_URL" \
+            -output "${CONFIG_FILE}.merged"; then
+            rm -f "${CONFIG_FILE}.merged"
+            return 1
+        fi
+        if ! mv "${CONFIG_FILE}.merged" "$CONFIG_FILE"; then
+            rm -f "${CONFIG_FILE}.merged"
+            return 1
+        fi
+        return 0
+    fi
+
+    return 0
+}
+
+refresh_subscription_config() {
+    if [ -n "$SUBSCRIPTION_PATH" ]; then
+        copy_subscription_file || return 1
+    elif [ -n "$SUBSCRIPTION_URL" ]; then
+        download_subscription || return 1
+    else
+        return 1
+    fi
+
+    apply_subscription_override || return 1
 }
 
 # 生成默认配置
@@ -117,13 +242,13 @@ set_global_proxy() {
 
 # 订阅定时更新
 start_subscription_updater() {
-    if [ -n "$SUBSCRIPTION_URL" ]; then
+    if has_subscription_source; then
         log "启动订阅定时更新 (间隔: ${SUBSCRIPTION_INTERVAL}小时)"
         (
             while true; do
                 sleep $((SUBSCRIPTION_INTERVAL * 3600))
                 log "定时更新订阅..."
-                if download_subscription; then
+                if refresh_subscription_config; then
                     apply_env_overrides
                     # 通知 mihomo 重载配置
                     if [ -n "$API_SECRET" ]; then
@@ -145,16 +270,37 @@ main() {
     
     # 确保配置目录存在
     mkdir -p "$CONFIG_DIR"
+
+    if ! is_unsigned_integer "$SUBSCRIPTION_INTERVAL" ||
+        [ "$SUBSCRIPTION_INTERVAL" -lt 1 ]; then
+        log "订阅更新间隔无效，改用 24 小时"
+        SUBSCRIPTION_INTERVAL=24
+    fi
+
+    if [ -n "$SUBSCRIPTION_PATH" ] && [ -n "$SUBSCRIPTION_URL" ]; then
+        log "同时配置了 SUBSCRIPTION_PATH 和 SUBSCRIPTION_URL，优先使用本地文件"
+    fi
+
+    if [ -n "$SUBSCRIPTION_OVERRIDE_FILE" ] && [ -n "$SUBSCRIPTION_OVERRIDE_URL" ]; then
+        log "同时配置了 SUBSCRIPTION_OVERRIDE_FILE 和 SUBSCRIPTION_OVERRIDE_URL，优先使用本地 override 文件"
+    fi
     
     # 配置文件处理优先级：
     # 1. 已挂载的配置文件
     # 2. 订阅下载的配置
     # 3. 默认配置
     
-    if [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
+    if has_subscription_source; then
+        if refresh_subscription_config; then
+            log "使用订阅源生成配置"
+        elif [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
+            log "订阅源刷新失败，回退到已存在的配置文件"
+        else
+            log "订阅源刷新失败，回退到默认配置"
+            generate_default_config
+        fi
+    elif [ -f "$CONFIG_FILE" ] && [ -s "$CONFIG_FILE" ]; then
         log "使用已存在的配置文件"
-    elif [ -n "$SUBSCRIPTION_URL" ]; then
-        download_subscription || generate_default_config
     else
         generate_default_config
     fi
@@ -173,8 +319,17 @@ main() {
         log "  - UI 路径: ${UI_DIR}"
         log "  - 全局代理组: ${GLOBAL_PROXY}"
     fi
-    if [ -n "$SUBSCRIPTION_URL" ]; then
+    if has_subscription_source; then
         log "  - 订阅更新间隔: ${SUBSCRIPTION_INTERVAL}小时"
+    fi
+    if [ -n "$SUBSCRIPTION_PATH" ]; then
+        log "  - 订阅文件路径: ${SUBSCRIPTION_PATH}"
+    fi
+    if [ -n "$SUBSCRIPTION_URL" ]; then
+        log "  - 订阅地址: ${SUBSCRIPTION_URL}"
+    fi
+    if has_subscription_override; then
+        log "  - override: 已启用"
     fi
     
     # 启动订阅更新器
